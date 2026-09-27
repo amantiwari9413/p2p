@@ -1,0 +1,20 @@
+{
+  "name": "p2p-live-room-server",
+  "version": "1.0.0",
+  "description": "Signaling + static server for P2P Live Room",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.17.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
