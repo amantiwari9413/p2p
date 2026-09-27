@@ -8,8 +8,8 @@ const { handleMessage, handleDisconnect } = require('./signaling');
 
 const PORT = process.env.PORT || 8080;
 
-// dist folder is at ./dist relative to server/
-const DIST_DIR = path.join(__dirname, '.', 'dist');
+// dist folder is at ../client/dist relative to server/
+const DIST_DIR = path.join(__dirname, '..', 'client', 'dist');
 
 // MIME types for static files
 const MIME = {
@@ -86,20 +86,36 @@ const server = http.createServer(serveStatic);
 const wss = new WebSocketServer({ server });
 
 // ── Rate limiting ─────────────────────────────────────────────────
+// Separate limits for signaling messages vs ICE candidates.
+// ICE candidates fire rapidly (10-30 per session) so they get their own
+// higher limit. Room create/join are low-frequency and keep a tighter limit.
 const rateLimits = new Map();
-const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = 20;
+const RATE_WINDOW_MS = 60_000; // 1 minute window
 
-function isRateLimited(ip) {
+// Per message-type limits per IP per window
+const RATE_LIMITS = {
+  'create-room':  5,    // max 5 room creates per minute
+  'join-room':    10,   // max 10 joins per minute
+  'ice-candidate': 300, // ICE fires 10-30 per connection, allow many viewers
+  'offer':        50,
+  'answer':       50,
+  'leave':        20,
+  '__default':    200,  // catch-all for other message types
+};
+
+function isRateLimited(ip, msgType) {
   const now = Date.now();
-  let entry = rateLimits.get(ip);
+  const key = `${ip}::${msgType}`;
+  const limit = RATE_LIMITS[msgType] ?? RATE_LIMITS['__default'];
+
+  let entry = rateLimits.get(key);
   if (!entry || now - entry.windowStart > RATE_WINDOW_MS) {
     entry = { count: 1, windowStart: now };
-    rateLimits.set(ip, entry);
+    rateLimits.set(key, entry);
     return false;
   }
   entry.count++;
-  return entry.count > RATE_MAX;
+  return entry.count > limit;
 }
 
 setInterval(() => {
@@ -120,11 +136,23 @@ wss.on('connection', (ws, req) => {
   send(ws, { type: 'connected', socketId: ws._socketId });
 
   ws.on('message', (data) => {
-    if (isRateLimited(ws._ip)) {
-      send(ws, { type: 'error', code: 'rate-limited', message: 'Too many requests' });
+    const raw = data.toString();
+    // Parse just the type for rate-limit check (don't full-parse yet)
+    let msgType = '__default';
+    try {
+      const peek = JSON.parse(raw);
+      msgType = peek.type || '__default';
+    } catch { /* malformed — let handleMessage reject it */ }
+
+    if (isRateLimited(ws._ip, msgType)) {
+      // Only log rate-limit hits for non-ICE to avoid log spam
+      if (msgType !== 'ice-candidate') {
+        console.warn(`[server] Rate limited ${ws._ip} on ${msgType}`);
+        send(ws, { type: 'error', code: 'rate-limited', message: 'Too many requests' });
+      }
       return;
     }
-    handleMessage(wss, ws, data.toString());
+    handleMessage(wss, ws, raw);
   });
 
   ws.on('close', () => {
