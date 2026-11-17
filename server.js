@@ -9,7 +9,7 @@ const { handleMessage, handleDisconnect } = require('./signaling');
 const PORT = process.env.PORT || 8080;
 
 // dist folder is at ../client/dist relative to server/
-const DIST_DIR = path.join(__dirname, '..', 'client', 'dist');
+const DIST_DIR = path.join(__dirname, 'dist');
 
 // MIME types for static files
 const MIME = {
